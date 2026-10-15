@@ -1,3 +1,7 @@
+import { db } from "./supabase.js";
+
+const FLAG = "FLAG{y0u_cr4ck3d_th3_s1mpl3_b0x}";
+
 // ===========================================================================
 //  TERMINAL GAME  —  find the vault, find the key, find the code
 //
@@ -34,7 +38,7 @@ function makeTree(level) {
       var: {
         log: { "auth.log": "user guest logged in\nuser guest denied: /var/vault" },
         vault: {
-          "READ_ME": "be standing in this directory, then type 'run secret'.",
+          "READ_ME": "be standing in this directory, then run secret.",
           "secret": "VAULT SEALED - need key + code"
         }
       },
@@ -74,7 +78,7 @@ function makeTree(level) {
         media: { "cat.jpg": "not a real image. just a name.", "cat2.jpg": "nor this." },
         deep: {
           vault: {
-            "READ_ME": "stand in /srv/deep/vault, then type unlock.",
+            "READ_ME": "stand in /srv/deep/vault, then run secret.",
             "secret": "VAULT SEALED - need key + code"
           }
         }
@@ -159,7 +163,6 @@ function makeTree(level) {
     const kids = {};
     const n = ri(1, width);
     for (let i = 0; i < n; i++) {
-      if (kids[name]) continue;
       let name = pick(DIRS);
       const style = rnd();
       if      (style < 0.10) name += "-" + ri(0, 99);            // cache-07
@@ -207,7 +210,7 @@ function makeTree(level) {
     Object.assign(cur, fill(1, width));
   }
   cur["vault"] = {
-    "READ_ME": "stand in this directory, then type 'run secret'.",
+    "READ_ME": "stand in this directory, then run secret.",
     "secret": "VAULT SEALED - need key + code"
   };
 
@@ -286,6 +289,8 @@ const MAXNAME = 3;
 let phase = "name";
 
 let hasKey = false, hasCode = false, unlocked = false;
+let runStart = 0;                // when this run started (ms)
+let runCommands = 0;             // commands typed this run
 let vaultPath = "/var/vault";    // where the vault is THIS run
 let gateText = "blue-otter-77";  // what the key file contains THIS run
 let codeText = "0815";           // what the code file contains THIS run
@@ -457,7 +462,6 @@ function printStream(text, cls, speed) {
   })();
 }
 
-const LOG_EXT = /\.(log|out|err|txt\b.*log)$/i;
 const isLog = name => /\.(log|out|err)$/i.test(name);
 
 function cmdRun(arg) {
@@ -506,15 +510,6 @@ function cmdUnlock() {
     return print("    get to the vault's directory first, then try again.", "hint");
   }
 
-  const missing = [];
-  if (!hasKey)  missing.push("key    — it is in another branch");
-  if (!hasCode) missing.push("code   — it is somewhere else again");
-  if (missing.length) {
-    print("the vault will not open yet. still missing:", "error");
-    missing.forEach(m => print("     " + m, "hint"));
-    return;
-  }
-
   openVault();
 }
 
@@ -538,10 +533,16 @@ function openVault() {
   print("executing " + vaultPath + "/secret ...");
   print("");
   printStream("  ***  GOOD JOB  ***", "flag", 14);
-  setTimeout(() => {
+  const seconds = Math.max(1, Math.round((Date.now() - runStart) / 1000));
+  const commands = Math.max(1, runCommands);
+  const clearedLevel = level;
+  setTimeout(async () => {
     print("  " + FLAG, "flag");
     print("");
-    print("  difficulty " + level + " cleared.", "hint");
+    print("  difficulty " + clearedLevel + " cleared in " + seconds + "s, " + commands + " commands.", "hint");
+    print("");
+    await saveScore(clearedLevel, seconds, commands);
+    await showScores(clearedLevel, 5);
     setTimeout(afterWin, 400);
   }, 420);
 }
@@ -614,6 +615,7 @@ function cmdHelp(arg) {
     [CMD.open,  "open the sealed vault"],
     ["run",     "execute a file (logs print line by line)"],
     ["tree",    "draw the filesystem as a tree"],
+    ["scores",  "leaderboard (scores 2 = difficulty 2)"],
     ["help",    "explain a command"],
     ["whoami",  "print the current user tag"],
     ["clear",   "clear the terminal screen"],
@@ -723,9 +725,9 @@ const HELP_PAGES = {
     print("    " + CMD.enter + " ..           step back out");
     print("");
     print("NOTES", "warn");
-    print("    Dots and slashes both separate path parts:");
-    print("        " + CMD.enter + " etc/config   and   " + CMD.enter + " etc.config");
-    print("    are the same place.");
+    print("    Path parts are separated by slashes only:");
+    print("        " + CMD.enter + " /etc/config     (not  " + CMD.enter + " etc.config )");
+    print("    A dot inside a name is part of the name — readme.txt is one file.");
     print("");
     print("SEE ALSO", "warn");
     print("    help " + CMD.list + ",  help tree");
@@ -911,6 +913,51 @@ const HELP_PAGES = {
 
 
 // ===========================================================================
+//  LEADERBOARD (Supabase) — one row per cleared run: handle, level, time
+// ===========================================================================
+const OFFLINE = "leaderboard offline: Supabase is not configured (see .env.example).";
+
+async function saveScore(lvl, seconds, commands) {
+  if (!db) return print(OFFLINE, "error");
+  print("saving score ...", "hint");
+  const { error } = await db.from("scores").insert({
+    name: USER, level: lvl, seconds: seconds, commands: commands
+  });
+  if (error) return print("could not save score: " + error.message, "error");
+  print("score saved as " + userTag() + ".", "ok");
+}
+
+// best times for one difficulty: fastest first, fewer commands breaks ties
+async function showScores(lvl, limit) {
+  if (!db) return print(OFFLINE, "error");
+  const { data, error } = await db
+    .from("scores")
+    .select("name, level, seconds, commands")
+    .eq("level", lvl)
+    .order("seconds", { ascending: true })
+    .order("commands", { ascending: true })
+    .limit(limit || 10);
+  if (error) return print("scores: " + error.message, "error");
+
+  print("");
+  print("LEADERBOARD — difficulty " + lvl, "warn");
+  if (!data.length) return print("    no scores yet. be the first.", "hint");
+  data.forEach((r, i) => {
+    const me = r.name === USER ? "   <- you" : "";
+    print("    " + String(i + 1).padStart(2) + ".  W:" + r.name.padEnd(5) +
+          String(r.seconds).padStart(5) + "s   " + String(r.commands).padStart(3) + " cmds" + me,
+          me ? "flag" : "output");
+  });
+  print("");
+}
+
+function cmdScores(arg) {
+  const n = parseInt(arg, 10);
+  const lvl = n >= 1 && n <= TIERS.length ? n : level;
+  return showScores(lvl, 10);
+}
+
+// ===========================================================================
 //  DISPATCH
 // ===========================================================================
 function run(raw) {
@@ -933,6 +980,7 @@ function run(raw) {
     return;
   }
   if (name === "tree" || name === "where" || name === "map") return cmdTree(arg);
+  if (name === "scores" || name === "top" || name === "leaderboard") return cmdScores(arg);
 
   print("unknown command: " + name, "error");
   print("    this run, that is:  " + CMD.list + "  " + CMD.enter + "  " + CMD.read +
@@ -959,6 +1007,8 @@ function loadLevel() {
 function startRun() {
   loadLevel();
   phase = "play";
+  runStart = Date.now();
+  runCommands = 0;
 
   const t = tierOf(level);
   print("");
@@ -1029,7 +1079,7 @@ function complete() {
   const isFirstWord = parts.length === 1;
   const stem = parts[parts.length - 1] || "";
 
-  const words = [CMD.list, CMD.enter, CMD.read, CMD.open, "run", "tree", "help", "whoami", "clear"];
+  const words = [CMD.list, CMD.enter, CMD.read, CMD.open, "run", "tree", "scores", "help", "whoami", "clear"];
   let shown;
 
   if (isFirstWord) {
@@ -1124,7 +1174,7 @@ cmdEl.addEventListener("keydown", e => {
     if (e.key === "Enter") {
       const raw = cmdEl.value.trim();
       cmdEl.value = "";
-      if (raw) { history.push(raw); histPos = 0; run(raw); }
+      if (raw) { history.push(raw); histPos = 0; runCommands++; run(raw); }
     } else if (e.key === "Tab") {
       e.preventDefault();
       complete();
