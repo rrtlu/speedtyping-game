@@ -34,7 +34,7 @@ function makeTree(level) {
       var: {
         log: { "auth.log": "user guest logged in\nuser guest denied: /var/vault" },
         vault: {
-          "READ_ME": "be standing in this directory, then type 'unlock'.",
+          "READ_ME": "be standing in this directory, then type 'run secret'.",
           "secret": "VAULT SEALED - need key + code"
         }
       },
@@ -207,7 +207,7 @@ function makeTree(level) {
     Object.assign(cur, fill(1, width));
   }
   cur["vault"] = {
-    "READ_ME": "stand in this directory, then type 'unlock'.",
+    "READ_ME": "stand in this directory, then type 'run secret'.",
     "secret": "VAULT SEALED - need key + code"
   };
 
@@ -262,6 +262,7 @@ const COMMON = {
   enter: ["cd", "go", "goto", "enter", "move", "travel", "descend"],
   read:  ["cat", "read", "type", "show", "print", "dump"],
   open:  ["unlock", "open", "breach", "crack", "force", "unseal", "shatter"],
+  run:   ["run", "exec", "execute", "./"],
   help:  ["help", "?", "man"],
   who:   ["whoami", "user"],
   wipe:  ["clear", "cls"],
@@ -362,13 +363,14 @@ function parsePath(str) {
 
   const absolute = str.startsWith("/");
   const raw = str.startsWith("~") ? str.slice(1) : str;
-  const parts = raw.split(/[/.]+/).filter(Boolean);
 
+  // split on slashes ONLY. ".." and "." are meaningful whole segments, and a
+  // dot inside a name (readme.txt) must not be treated as a separator.
   const out = absolute ? [] : [...cwd];
-  for (const p of parts) {
-    if (p === ".") continue;
-    if (p === "..") { out.pop(); continue; }
-    out.push(p);
+  for (const seg of raw.split("/")) {
+    if (seg === "" || seg === ".") continue;      // empty and "here" do nothing
+    if (seg === "..") { out.pop(); continue; }    // up one level
+    out.push(seg);
   }
   return out;
 }
@@ -442,6 +444,59 @@ function cmdCat(arg) {
   if (node.includes(codeText) && !hasCode) { hasCode = true; print(">> code acquired", "flag"); }
 }
 
+// Streams a block of text one character at a time, so long output arrives the
+// way the opening briefing does rather than appearing all at once.
+function printStream(text, cls, speed) {
+  const lines = String(text).split("\n");
+  let i = 0;
+  (function next() {
+    if (i >= lines.length) return;
+    const line = lines[i++];
+    printTyped(line, cls, speed || 6);
+    setTimeout(next, line.length * (speed || 6) + 40);
+  })();
+}
+
+const LOG_EXT = /\.(log|out|err|txt\b.*log)$/i;
+const isLog = name => /\.(log|out|err)$/i.test(name);
+
+function cmdRun(arg) {
+  if (!arg) {
+    const files = visibleNames(here()).filter(n => !isDir(here()[n]));
+    if (!files.length) return print("nothing here to run. try  " + CMD.list + "  or  cd ..", "error");
+    print("run which file? files here:");
+    return print("     " + files.join("   "), "hint");
+  }
+
+  const target = parsePath(arg);
+  const node = nodeAt(target);
+
+  if (node === undefined) return print("no such file: " + arg, "error");
+  if (isDir(node)) {
+    print(pathStr(target) + " is a directory.", "error");
+    return print("    did you mean:  " + CMD.enter + " " + pathStr(target), "hint");
+  }
+
+  const name = target[target.length - 1] || "";
+
+  // the vault artefact — running it is what opens the vault
+  if (pathStr(target) === vaultPath + "/secret") return openVault();
+
+  // key and code files
+  const isGate = node.includes(gateText);
+  const isCode = node.includes(codeText);
+
+  if (isLog(name)) {
+    // logs stream line by line
+    printStream(node, "output", 5);
+  } else {
+    print(node, "output");
+  }
+
+  if (isGate && !hasKey) { hasKey = true; print(">> key acquired", "flag"); }
+  if (isCode && !hasCode) { hasCode = true; print(">> code acquired", "flag"); }
+}
+
 function cmdUnlock() {
   if (unlocked) return print("the vault is already open.", "flag");
 
@@ -460,17 +515,35 @@ function cmdUnlock() {
     return;
   }
 
+  openVault();
+}
+
+// shared by the open word and by  run <vault file>
+function openVault() {
+  if (unlocked) return print("the vault is already open.", "flag");
+
+  const missing = [];
+  if (!hasKey)  missing.push("key    — it is in another branch");
+  if (!hasCode) missing.push("code   — it is somewhere else again");
+  if (missing.length) {
+    print("the vault resists. still missing:", "error");
+    missing.forEach(m => print("     " + m, "hint"));
+    return;
+  }
+
   unlocked = true;
   print("");
   print("key accepted.", "ok");
   print("code accepted.", "ok");
-  print("opening " + vaultPath + "/secret ...");
+  print("executing " + vaultPath + "/secret ...");
   print("");
-  print("  ***  GOOD JOB  ***", "flag");
-  print("  " + FLAG, "flag");
-  print("");
-  print("  difficulty " + level + " cleared.", "hint");
-  setTimeout(afterWin, 400);
+  printStream("  ***  GOOD JOB  ***", "flag", 14);
+  setTimeout(() => {
+    print("  " + FLAG, "flag");
+    print("");
+    print("  difficulty " + level + " cleared.", "hint");
+    setTimeout(afterWin, 400);
+  }, 420);
 }
 
 function cmdTree(arg) {
@@ -523,7 +596,7 @@ function cmdHelp(arg) {
   if (arg) {
     const asked = arg.trim().toLowerCase();
     // accept this run's word, or any of the aliases, or a bare action name
-    const action = ["list","enter","read","open","tree","help","who","wipe"].find(k =>
+    const action = ["list","enter","read","open","run","tree","help","who","wipe"].find(k =>
       k === asked || inList(asked, k));
     if (!action) {
       print("no help for '" + arg + "'.", "error");
@@ -539,6 +612,7 @@ function cmdHelp(arg) {
     [CMD.enter, "change the working directory"],
     [CMD.read,  "print the contents of a file"],
     [CMD.open,  "open the sealed vault"],
+    ["run",     "execute a file (logs print line by line)"],
     ["tree",    "draw the filesystem as a tree"],
     ["help",    "explain a command"],
     ["whoami",  "print the current user tag"],
@@ -749,6 +823,34 @@ const HELP_PAGES = {
     print("    help " + CMD.list + ",  help " + CMD.enter);
   },
 
+  run: () => {
+    print("NAME", "warn");
+    print("    run — execute a file");
+    print("");
+    print("SYNOPSIS", "warn");
+    print("    run <file> [//addon]");
+    print("");
+    print("DESCRIPTION", "warn");
+    print("    Runs a file and prints what it produces. Log files stream their");
+    print("    lines out one character at a time, the way the briefing does.");
+    print("    Running the vault artefact is what opens the vault.");
+    print("");
+    print("SUBCOMMANDS", "warn");
+    print("    run secret             run a file in this directory");
+    print("    run /var/log/auth.log  run any file, by full path");
+    print("    run                    alone: lists the files you could run");
+    print("");
+    print("ADDONS", "warn");
+    print("    //q          quiet: print the whole file at once");
+    print("");
+    print("EXAMPLES", "warn");
+    print("    run /var/log/auth.log");
+    print("    run secret             (standing in the vault's directory)");
+    print("");
+    print("SEE ALSO", "warn");
+    print("    help " + CMD.read + ",  help " + CMD.open);
+  },
+
   who: () => {
     print("NAME", "warn");
     print("    whoami — print the current user tag");
@@ -822,6 +924,7 @@ function run(raw) {
   if (inList(name, "list"))  return cmdLs(arg);
   if (inList(name, "enter")) return cmdCd(arg);
   if (inList(name, "read"))  return cmdCat(arg);
+  if (inList(name, "run"))   return cmdRun(arg);
   if (inList(name, "open"))  return cmdUnlock(arg);
   if (inList(name, "who"))   return print(userTag() + "  (3-char handle)", "output");
   if (inList(name, "wipe"))  {
@@ -833,7 +936,7 @@ function run(raw) {
 
   print("unknown command: " + name, "error");
   print("    this run, that is:  " + CMD.list + "  " + CMD.enter + "  " + CMD.read +
-        "  " + CMD.open + "   (help for the rest)", "hint");
+        "  run  " + CMD.open + "   (help for the rest)", "hint");
 }
 
 
@@ -926,7 +1029,7 @@ function complete() {
   const isFirstWord = parts.length === 1;
   const stem = parts[parts.length - 1] || "";
 
-  const words = [CMD.list, CMD.enter, CMD.read, CMD.open, "tree", "help", "whoami", "clear"];
+  const words = [CMD.list, CMD.enter, CMD.read, CMD.open, "run", "tree", "help", "whoami", "clear"];
   let shown;
 
   if (isFirstWord) {
