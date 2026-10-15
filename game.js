@@ -1,3 +1,7 @@
+import { db } from "./supabase.js";
+
+const OFFLINE_MSG = "leaderboard offline: Supabase is not configured (see .env.example)";
+
 // --- the filesystem: nested objects. "file" holds text, "dir" holds children ---
 const fs = {
   home: {
@@ -33,6 +37,12 @@ const promptEl = document.getElementById("prompt");
 
 let hasKey = false, hasCode = false, unlocked = false;
 
+// --- leaderboard state ---
+let startTime = null;
+let commandCount = 0;
+let finalSeconds = 0;
+let awaitingName = false;
+
 // --- helpers ---
 function print(text, cls) {
   const line = document.createElement("span");
@@ -48,8 +58,12 @@ function here() {                       // the object at the current path
   return node;
 }
 
+function pathText() {                   // e.g. "/home/notes", or "/" at the root
+  return "/" + cwd.join("/");
+}
+
 function promptText() {
-  promptEl.textContent = cwd.join("/") + " >";
+  promptEl.textContent = pathText() + " >";
 }
 
 // --- commands ---
@@ -81,7 +95,7 @@ function cmdCat(arg) {
 }
 
 function cmdCdUp() {
-  if (cwd.length > 1) cwd.pop();
+  if (cwd.length > 0) cwd.pop();          // allow going up to the root "/"
   promptText();
 }
 
@@ -94,6 +108,12 @@ function cmdUnlock() {
   print("code accepted.");
   print("opening /var/vault/secret ...");
   print(FLAG, "flag");
+
+  finalSeconds = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+  print("");
+  print(`time: ${finalSeconds}s   commands: ${commandCount}`, "flag");
+  print("enter your name for the leaderboard:");
+  awaitingName = true;
 }
 
 function cmdHelp() {
@@ -102,27 +122,57 @@ function cmdHelp() {
   print("cd ..         go up");
   print("cat <file>    read a file");
   print("unlock        open the vault (needs key + code)");
+  print("scores        show the leaderboard");
   print("clear         clear the screen");
   print("");
   print("tab           complete a command or filename");
   print("up / down     walk through your command history");
 }
 
+// --- leaderboard (Supabase) ---
+async function saveScore(name) {
+  print("> " + name, "input");
+  if (!db) return print(OFFLINE_MSG, "error");
+  const { error } = await db.from("scores").insert({
+    name: name.slice(0, 20),
+    seconds: finalSeconds,
+    commands: commandCount
+  });
+  if (error) return print("could not save score: " + error.message, "error");
+  print("score saved! type 'scores' to see the leaderboard.", "flag");
+}
+
+async function cmdScores() {
+  if (!db) return print(OFFLINE_MSG, "error");
+  print("loading...");
+  const { data, error } = await db
+    .from("scores")
+    .select("name, seconds, commands")
+    .order("seconds", { ascending: true })
+    .limit(10);
+  if (error) return print("scores: " + error.message, "error");
+  if (!data.length) return print("leaderboard is empty.");
+  data.forEach((r, i) =>
+    print(`${String(i + 1).padStart(2)}. ${r.name.padEnd(20)} ${r.seconds}s   ${r.commands} cmds`)
+  );
+}
+
 // --- dispatch ---
 function run(raw) {
-  print(cwd.join("/") + " >" + raw, "input");
+  print(pathText() + " >" + raw, "input");
   const [name, arg] = raw.split(/\s+/);
   if (name === "ls")         cmdLs();
   else if (name === "cd")    { arg === ".." ? cmdCdUp() : cmdCd(arg); }
   else if (name === "cat")   cmdCat(arg);
   else if (name === "unlock")cmdUnlock();
   else if (name === "help")  cmdHelp();
+  else if (name === "scores") cmdScores();
   else if (name === "clear") screenEl.innerHTML = "";
   else print("unknown command: " + name, "error");
 }
 
 // --- command list for tab-completion ---
-const COMMANDS = ["ls", "cd", "cat", "unlock", "help", "clear"];
+const COMMANDS = ["ls", "cd", "cat", "unlock", "scores", "help", "clear"];
 
 // completes the word under the cursor: commands if it's the first word,
 // filenames from the current directory otherwise.
@@ -154,6 +204,13 @@ cmdEl.addEventListener("keydown", e => {
     const raw = cmdEl.value.trim();
     cmdEl.value = "";
     if (raw) {
+      if (awaitingName) {             // the line after unlocking is the player's name
+        awaitingName = false;
+        saveScore(raw);
+        return;
+      }
+      if (!startTime) startTime = Date.now();
+      commandCount++;
       history.push(raw);
       histPos = 0;
       run(raw);
