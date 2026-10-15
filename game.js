@@ -34,7 +34,7 @@ function makeTree(level) {
       var: {
         log: { "auth.log": "user guest logged in\nuser guest denied: /var/vault" },
         vault: {
-          "READ_ME": "be standing in this directory, then type 'run secret'.",
+          "READ_ME": "be standing in this directory, then run secret.",
           "secret": "VAULT SEALED - need key + code"
         }
       },
@@ -74,7 +74,7 @@ function makeTree(level) {
         media: { "cat.jpg": "not a real image. just a name.", "cat2.jpg": "nor this." },
         deep: {
           vault: {
-            "READ_ME": "stand in /srv/deep/vault, then type unlock.",
+            "READ_ME": "stand in /srv/deep/vault, then run secret.",
             "secret": "VAULT SEALED - need key + code"
           }
         }
@@ -159,7 +159,6 @@ function makeTree(level) {
     const kids = {};
     const n = ri(1, width);
     for (let i = 0; i < n; i++) {
-      if (kids[name]) continue;
       let name = pick(DIRS);
       const style = rnd();
       if      (style < 0.10) name += "-" + ri(0, 99);            // cache-07
@@ -207,7 +206,7 @@ function makeTree(level) {
     Object.assign(cur, fill(1, width));
   }
   cur["vault"] = {
-    "READ_ME": "stand in this directory, then type 'run secret'.",
+    "READ_ME": "stand in this directory, then run secret.",
     "secret": "VAULT SEALED - need key + code"
   };
 
@@ -457,7 +456,6 @@ function printStream(text, cls, speed) {
   })();
 }
 
-const LOG_EXT = /\.(log|out|err|txt\b.*log)$/i;
 const isLog = name => /\.(log|out|err)$/i.test(name);
 
 function cmdRun(arg) {
@@ -504,15 +502,6 @@ function cmdUnlock() {
   if (pathStr(cwd) !== vaultPath) {
     print("there is no vault in this directory.", "error");
     return print("    get to the vault's directory first, then try again.", "hint");
-  }
-
-  const missing = [];
-  if (!hasKey)  missing.push("key    — it is in another branch");
-  if (!hasCode) missing.push("code   — it is somewhere else again");
-  if (missing.length) {
-    print("the vault will not open yet. still missing:", "error");
-    missing.forEach(m => print("     " + m, "hint"));
-    return;
   }
 
   openVault();
@@ -723,9 +712,9 @@ const HELP_PAGES = {
     print("    " + CMD.enter + " ..           step back out");
     print("");
     print("NOTES", "warn");
-    print("    Dots and slashes both separate path parts:");
-    print("        " + CMD.enter + " etc/config   and   " + CMD.enter + " etc.config");
-    print("    are the same place.");
+    print("    Path parts are separated by slashes only:");
+    print("        " + CMD.enter + " /etc/config     (not  " + CMD.enter + " etc.config )");
+    print("    A dot inside a name is part of the name — readme.txt is one file.");
     print("");
     print("SEE ALSO", "warn");
     print("    help " + CMD.list + ",  help tree");
