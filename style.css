@@ -1,0 +1,36 @@
+body {
+  background: #050a07;
+  color: #39ff88;
+  font: 15px/1.6 monospace;
+  margin: 0;
+  padding: 20px;
+}
+
+#screen {
+  max-width: 760px;
+  margin: 0 auto;
+  height: 70vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.input { color: #6fe7ff; }
+.error { color: #ff5c5c; }
+.flag  { color: #ffb545; font-weight: bold; }
+
+#row {
+  max-width: 760px;
+  margin: 10px auto 0;
+  display: flex;
+}
+
+#prompt { margin-right: 8px; }
+
+#cmd {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: #39ff88;
+  font: inherit;
+}
