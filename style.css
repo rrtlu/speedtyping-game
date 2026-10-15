@@ -14,9 +14,12 @@ body {
   white-space: pre-wrap;
 }
 
-.input { color: #6fe7ff; }
+.input { color: #39ff88; }                 /* the command you typed: plain */
+.output { color: #6fe7ff; }                /* what the machine answers: blue */
 .error { color: #ff5c5c; }
 .flag  { color: #ffb545; font-weight: bold; }
+.dir   { color: #6fe7ff; font-weight: bold; }
+.hint  { color: #7d9d8a; }
 
 #row {
   max-width: 760px;
@@ -24,7 +27,10 @@ body {
   display: flex;
 }
 
-#prompt { margin-right: 8px; }
+#prompt {
+  margin-right: 8px;
+  white-space: nowrap;
+}
 
 #cmd {
   flex: 1;
