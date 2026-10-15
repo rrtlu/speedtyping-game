@@ -20,6 +20,8 @@ body {
 .flag  { color: #ffb545; font-weight: bold; }
 .dir   { color: #6fe7ff; font-weight: bold; }
 .hint  { color: #7d9d8a; }
+.warn  { color: #ffb545; }
+.ok    { color: #39ff88; font-weight: bold; }
 
 #row {
   max-width: 760px;
